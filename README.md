@@ -30,7 +30,9 @@ npm run preview        # serve dist/ on port 4174
 node tests/make-fixtures.cjs   # synthetic photos (already included)
 node tests/make-dng.cjs        # synthetic RAW file (already included)
 npm run build && npm run preview &
-node tests/e2e.cjs             # 28 browser checks; screenshots in tests/shots/
+node tests/e2e.cjs             # 28 desktop browser checks; screenshots in tests/shots/
+node tests/phone.cjs           # every module at phone size (DEV="iPad Mini" for others)
+node tests/phone-touch.cjs     # touch: slider swipes, sheet scrolling, pinch zoom
 ```
 
 ## Layout

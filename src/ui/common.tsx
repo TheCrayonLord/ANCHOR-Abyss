@@ -40,24 +40,36 @@ export function Slider(p: SliderProps) {
   const drag = (e: React.PointerEvent) => {
     if (p.disabled) return;
     const el = ref.current!;
-    el.setPointerCapture(e.pointerId);
     const r = el.getBoundingClientRect();
-    const startX = e.clientX, startV = p.value;
+    const startX = e.clientX, startY = e.clientY, startV = p.value;
+    const touch = e.pointerType === 'touch';
     const fine = e.shiftKey ? 0.2 : 1;
-    let moved = false;
+    let moved = false, dead = false;
     let last = p.value;
+    if (!touch) el.setPointerCapture(e.pointerId);
     const at = (x: number) => clamp(p.min + ((x - r.left) / r.width) * (p.max - p.min));
     const mv = (ev: PointerEvent) => {
+      if (dead) return;
+      if (touch && !moved) {
+        // On touch, a mostly vertical swipe scrolls the panel; a sideways one adjusts the slider (relative, like a phone editor).
+        const dx = Math.abs(ev.clientX - startX), dy = Math.abs(ev.clientY - startY);
+        if (dx < 6 && dy < 6) return;
+        if (dy > dx) { dead = true; return; }
+        try { el.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+      }
       moved = true;
-      const v = fine < 1 ? clamp(startV + ((ev.clientX - startX) / r.width) * (p.max - p.min) * fine) : at(ev.clientX);
+      const v = touch ? clamp(startV + ((ev.clientX - startX) / r.width) * (p.max - p.min))
+        : fine < 1 ? clamp(startV + ((ev.clientX - startX) / r.width) * (p.max - p.min) * fine) : at(ev.clientX);
       last = v; p.onChange(v);
     };
-    const up = () => {
-      el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up);
-      if (!moved) { last = at(startX); p.onChange(last); }
+    const end = (cancel: boolean) => () => {
+      el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', cn);
+      if (cancel || dead) { if (moved) { p.onChange(startV); } return; }
+      if (!moved) { if (touch) return; last = at(startX); p.onChange(last); }
       p.onCommit?.(last);
     };
-    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
+    const up = end(false), cn = end(true);
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', cn);
   };
   const key = (e: React.KeyboardEvent) => {
     let d = 0;
@@ -272,3 +284,26 @@ export function Seg<T extends string>({ value, options, onChange }: { value: T; 
 
 export function fmtExposure(e?: number) { if (!e) return ''; return e >= 1 ? `${e}s` : `1/${Math.round(1 / e)}s`; }
 export function fmtBytes(n: number) { return n > 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' KB'; }
+
+/** True on phone-sized screens, where side panels become bottom sheets. */
+export function usePhone() {
+  const q = '(max-width: 900px)';
+  const [m, setM] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(q).matches);
+  useEffect(() => {
+    const mq = matchMedia(q); const f = () => setM(mq.matches);
+    mq.addEventListener('change', f); return () => mq.removeEventListener('change', f);
+  }, []);
+  return m;
+}
+
+/** Size of an element, kept up to date. */
+export function useBox<T extends HTMLElement>(): [React.RefObject<T>, number, number] {
+  const ref = useRef<T>(null);
+  const [wh, setWh] = useState<[number, number]>([0, 0]);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const ro = new ResizeObserver(() => setWh([el.clientWidth, el.clientHeight]));
+    ro.observe(el); return () => ro.disconnect();
+  }, []);
+  return [ref, wh[0], wh[1]];
+}

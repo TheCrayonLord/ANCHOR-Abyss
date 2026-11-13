@@ -153,13 +153,14 @@ function RuleRow({ r, onChange, onRemove }: { r: Rule; onChange: (r: Rule) => vo
 function FilterBar() {
   const f = useStore((s) => s.filter);
   const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
   const cams = useMemo(() => [...new Set([...store.s.photos.values()].map((p) => p.exif.model || 'Unknown'))].sort(), [store.s.photos.size]);
   const lenses = useMemo(() => [...new Set([...store.s.photos.values()].map((p) => p.exif.lens || 'Unknown'))].sort(), [store.s.photos.size]);
   const set = (p: Partial<typeof f>) => store.set({ filter: { ...f, ...p } });
   const active = JSON.stringify(f) !== JSON.stringify(emptyFilter());
   return (
-    <div className="filterbar">
-      <FilterIcon size={14} />
+    <div className={'filterbar' + (more ? ' more' : '')}>
+      <button className={'icon fb-toggle' + (more || active ? ' on' : '')} title="More filters" onClick={() => setMore(!more)}><FilterIcon size={14} /></button>
       <input className="search" placeholder="Search names, keywords, captions, cameras…" value={f.text} onChange={(e) => set({ text: e.target.value })} />
       <span className="fb-group">
         <select value={f.ratingOp} onChange={(e) => set({ ratingOp: e.target.value as any })}><option value=">=">≥</option><option value="=">=</option><option value="<=">≤</option></select>
@@ -202,7 +203,11 @@ function Grid({ photos }: { photos: Photo[] }) {
         return (
           <div key={p.id} className={'cell' + (sel.includes(p.id) ? ' sel' : '') + (active === p.id ? ' active' : '') + (p.flag === -1 ? ' rejected' : '')}
             draggable onDragStart={(e) => { const dragIds = sel.includes(p.id) ? sel : [p.id]; e.dataTransfer.setData('text/abyss-ids', JSON.stringify(dragIds)); }}
-            onClick={(e) => store.select(p.id, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'set', ids)}
+            onClick={(e) => {
+              // On phones a second tap on the current photo opens it large (double-click is unreliable on touch).
+              if (active === p.id && !e.shiftKey && !e.metaKey && !e.ctrlKey && matchMedia('(max-width: 900px)').matches) { store.set({ libView: 'loupe' }); return; }
+              store.select(p.id, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'set', ids);
+            }}
             onDoubleClick={() => { store.select(p.id); store.set({ libView: 'loupe' }); }}>
             <div className="cell-top"><span className="cell-idx">{i + 1}</span>{p.virtual && <span className="badge-v" title="Virtual copy">VC</span>}{stackN > 1 && <span className="badge-v" title="Stack — click to expand" onClick={(e) => { e.stopPropagation(); store.savePrefs({ expandStacks: !store.s.prefs.expandStacks }); }}><Layers3 size={10} />{stackN}</span>}{p.edited && <span className="badge-e" title="Edited">✎</span>}<FlagMark flag={p.flag} /></div>
             <div className="cell-img"><Thumb p={p} /></div>
@@ -224,7 +229,7 @@ function EmptyLibrary() {
   return (
     <div className="empty-state">
       {n ? <><h2>No photos match</h2><p>Try a different source or clear the filter.</p><button className="btn" onClick={() => store.set({ filter: emptyFilter(), source: { kind: 'all' } })}>Show all photos</button></>
-        : <><div className="logo-big" /><h2>Welcome to ANCHOR Abyss</h2><p>Import photos to start. JPEG, PNG, TIFF, HEIC, WebP and RAW files from most cameras (DNG, CR2, CR3, NEF, ARW, RAF, ORF, RW2 and more) are supported. Everything stays on this device.</p>
+        : <><img className="logo-big" src="icon.svg" alt="" /><h2>Welcome to ANCHOR Abyss</h2><p>Import photos to start. JPEG, PNG, TIFF, HEIC, WebP and RAW files from most cameras (DNG, CR2, CR3, NEF, ARW, RAF, ORF, RW2 and more) are supported. Everything stays on this device.</p>
           <button className="btn primary big" onClick={() => (document.getElementById('import-input') as HTMLInputElement)?.click()}>Import photos…</button>
           <p className="hint">Or drop files or folders anywhere in this window.</p></>}
     </div>
@@ -318,7 +323,7 @@ function LibToolbar({ count }: { count: number }) {
     <div className="toolbar bottom">
       <Seg value={st.libView} options={[['grid', <Grid3x3 size={14} key="g" />], ['loupe', <Square size={14} key="l" />], ['compare', <Columns2 size={14} key="c" />], ['survey', <LayoutGrid size={14} key="s" />]]} onChange={(v) => store.set({ libView: v })} />
       <span className="sep" />
-      <span className="lbl">Sort</span>
+      <span className="lbl sort-lbl">Sort</span>
       <select value={st.sort} onChange={(e) => store.set({ sort: e.target.value as SortKey })}>
         <option value="captureTime">Capture time</option><option value="importedAt">Import order</option><option value="name">File name</option><option value="rating">Rating</option><option value="label">Color label</option><option value="edited">Edited</option><option value="ext">File type</option>
       </select>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, SkipBack, SkipForward, X, MapPin, Download, Printer, Music } from 'lucide-react';
-import { Section, Slider, Thumb, Seg } from './common';
+import { Section, Slider, Thumb, Seg, useBox } from './common';
 import { store, useStore, photoTitle, type Photo } from '../catalog/store';
 import { renderForDisplay, download } from '../engine/export';
 
@@ -42,6 +42,9 @@ export function MapModule() {
           setPlacing(false);
         });
         mapRef.current = m;
+        // keep the map sized to its box (phone sheets and window resizes change it)
+        const ro = new ResizeObserver(() => m.invalidateSize());
+        ro.observe(ref.current!); m.on('unload', () => ro.disconnect());
         layer.current = L.layerGroup().addTo(m);
         drawMarkers(L);
       } catch (e: any) { setErr('The map could not load. It needs an internet connection for map tiles.'); }
@@ -210,6 +213,7 @@ export function PrintModule() {
   const o = { page: 'Letter (8.5×11 in)', landscape: false, layout: 'single', cols: 4, rows: 5, margin: 36, gap: 12, captions: true, fill: false, dpi: 300, border: 0, sharpen: true, ...(prefs.print || {}) };
   const set = (p: any) => store.savePrefs({ print: { ...o, ...p } });
   const [busy, setBusy] = useState(false);
+  const [box, bw, bh] = useBox<HTMLDivElement>();
   let [pw, ph] = PAGES[o.page] || PAGES['Letter (8.5×11 in)'];
   if (o.landscape) [pw, ph] = [ph, pw];
   const cols = o.layout === 'single' ? 1 : o.layout === 'two' ? 1 : o.cols;
@@ -253,7 +257,8 @@ export function PrintModule() {
       return new Blob([bytes], { type: 'application/pdf' });
     } finally { setBusy(false); }
   };
-  const scale = 420 / Math.max(pw, ph);
+  // Fit the page preview inside the space it has (leaves room for the page counter).
+  const scale = bw && bh ? Math.max(0.05, Math.min((bw - 24) / pw, (bh - 48) / ph, 560 / Math.max(pw, ph))) : 420 / Math.max(pw, ph);
   return (
     <div className="module print">
       <aside className="left-panel">
@@ -269,7 +274,7 @@ export function PrintModule() {
         </Section>
       </aside>
       <main className="center">
-        <div className="print-preview">
+        <div className="print-preview" ref={box}>
           <div className="paper" style={{ width: pw * scale, height: ph * scale }}>
             {photos.slice(0, perPage).map((p, k) => { const b = cell(k); return <div key={p.id} className="paper-cell" style={{ left: b.x * scale, top: b.y * scale, width: b.w * scale, height: b.h * scale }}><Thumb p={p} style={{ objectFit: o.fill ? 'cover' : 'contain' }} /></div>; })}
           </div>

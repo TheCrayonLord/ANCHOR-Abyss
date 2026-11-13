@@ -1,17 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, Upload, Settings as Cog, HelpCircle, Merge, Copy, Layers3 } from 'lucide-react';
+import { Download, Upload, Settings as Cog, HelpCircle, Merge, Copy, Layers3, FolderOpen, PanelLeft, SlidersHorizontal, X } from 'lucide-react';
 import { store, useStore, photoTitle } from './catalog/store';
 import Library from './ui/Library';
 import Develop, { SyncDialog } from './ui/Develop';
 import { MapModule, SlideshowModule, PrintModule, BookModule, WebModule } from './ui/Outputs';
 import { ImportDialog, ExportDialog, MergeDialog, PrefsDialog, HelpDialog } from './ui/Dialogs';
-import { Thumb, Stars, FlagMark, LabelDot } from './ui/common';
+import { Thumb, Stars, FlagMark, LabelDot, usePhone } from './ui/common';
 import { ACCEPT, isSupported } from './engine/decode';
 import { apply } from './engine/settings';
 import { refreshThumb } from './engine/export';
 
 const MODULES = [['library', 'Library'], ['develop', 'Develop'], ['map', 'Map'], ['book', 'Book'], ['slideshow', 'Slideshow'], ['print', 'Print'], ['web', 'Web']] as const;
 const LABEL_KEYS: Record<string, any> = { '6': 'red', '7': 'yellow', '8': 'green', '9': 'blue' };
+
+const PHONE_TABS: Record<string, ['left' | 'right', string][]> = {
+  library: [['left', 'Catalog'], ['right', 'Info & quick edit']],
+  develop: [['left', 'Presets & history'], ['right', 'Adjust']],
+  map: [['left', 'Places']],
+  slideshow: [['left', 'Slides'], ['right', 'Playback']],
+  print: [['left', 'Layout'], ['right', 'Page & image']],
+  book: [['left', 'Book'], ['right', 'Export']],
+  web: [['left', 'Gallery'], ['right', 'Appearance']],
+};
 
 export default function App() {
   const st = useStore((s) => s);
@@ -24,6 +34,10 @@ export default function App() {
   const [lights, setLights] = useState(0);
   const [panels, setPanels] = useState(true);
   const [drag, setDrag] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const phone = usePhone();
+  // On phones the side panels open one at a time as a sheet under the photo.
+  const [sheet, setSheet] = useState<'none' | 'left' | 'right'>('none');
   const fileInput = useRef<HTMLInputElement>(null);
   const dirInput = useRef<HTMLInputElement>(null);
 
@@ -113,31 +127,35 @@ export default function App() {
     return out;
   };
 
+  useEffect(() => { setSheet(st.module === 'develop' ? 'right' : 'none'); }, [st.module]);
+
   const startImport = (files: File[]) => {
     const ok = files.filter((f) => isSupported(f.name));
     if (!ok.length) { store.toast('No supported photos in that selection'); return; }
     setImportFiles(ok);
   };
 
-  if (!st.ready) return <div className="boot"><div className="logo-big" /><p>Opening catalog…</p></div>;
+  if (!st.ready) return <div className="boot"><img className="logo-big" src="icon.svg" alt="" /><p>Opening catalog…</p></div>;
 
   const filmPhotos = store.visible();
+  const tabs = PHONE_TABS[st.module] || [];
   const showFilm = !st.prefs.hideFilmstrip && st.module !== 'map';
 
   return (
-    <div className={`app lights-${lights}${panels ? '' : ' no-panels'}`}
+    <div className={`app lights-${lights}${panels ? '' : ' no-panels'}${phone ? ' phone sheet-' + sheet : ''}`}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDrag(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={async (e) => { if (!e.dataTransfer.types.includes('Files')) return; e.preventDefault(); setDrag(false); startImport(await collect(e.dataTransfer.items)); }}>
       <header className="topbar">
-        <div className="brand"><span className="logo" /><span className="brand-name">ANCHOR <b>Abyss</b></span></div>
+        <div className="brand"><img className="logo" src="icon.svg" alt="" /><span className="brand-name">ANCHOR <b>Abyss</b></span></div>
         <div className="top-actions">
-          <button className="btn small" onClick={() => fileInput.current?.click()} title="Import photos (Ctrl+Shift+I)"><Upload size={14} /> Import</button>
-          <button className="btn small" onClick={() => dirInput.current?.click()} title="Import a folder">Folder</button>
-          <button className="btn small" onClick={() => setExporting(true)} disabled={!st.photos.size} title="Export (Ctrl+Shift+E)"><Download size={14} /> Export</button>
-          <div className="menu-wrap">
-            <button className="btn small"><Merge size={14} /> Photo</button>
-            <div className="menu">
+          <button className="btn small" onClick={() => fileInput.current?.click()} title="Import photos (Ctrl+Shift+I)"><Upload size={14} /><span>Import</span></button>
+          <button className="btn small" onClick={() => dirInput.current?.click()} title="Import a folder"><FolderOpen size={14} /><span>Folder</span></button>
+          <button className="btn small" onClick={() => setExporting(true)} disabled={!st.photos.size} title="Export (Ctrl+Shift+E)"><Download size={14} /><span>Export</span></button>
+          <div className={'menu-wrap' + (menu ? ' open' : '')}>
+            <button className="btn small" title="Photo menu" onClick={() => setMenu((v) => !v)}><Merge size={14} /><span>Photo</span></button>
+            {menu && <div className="menu-catcher" onClick={() => setMenu(false)} />}
+            <div className="menu" onClick={() => setMenu(false)}>
               <button onClick={() => setMerge('hdr')}>Photo Merge › HDR… <kbd>Ctrl+Shift+H</kbd></button>
               <button onClick={() => setMerge('pano')}>Photo Merge › Panorama… <kbd>Ctrl+Shift+M</kbd></button>
               <button onClick={() => st.active && store.virtualCopy(st.active)}>Create virtual copy <kbd>Ctrl+'</kbd></button>
@@ -168,6 +186,14 @@ export default function App() {
         {st.module === 'book' && <BookModule />}
         {st.module === 'web' && <WebModule />}
       </div>
+
+      {phone && tabs.length > 0 && <nav className="phone-tabs">
+        {tabs.map(([side, label]) => (
+          <button key={side} data-p={side} className={sheet === side ? 'on' : ''} onClick={() => setSheet(sheet === side ? 'none' : side)}>
+            {sheet === side ? <X size={15} /> : side === 'left' ? <PanelLeft size={15} /> : <SlidersHorizontal size={15} />}<span>{label}</span>
+          </button>
+        ))}
+      </nav>}
 
       {showFilm && <div className="filmstrip">
         <div className="film-info">{st.active && st.photos.get(st.active) ? photoTitle(st.photos.get(st.active)!) : ''} <span className="hint">{filmPhotos.length} photos</span></div>

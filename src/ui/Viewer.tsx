@@ -46,6 +46,10 @@ export default function Viewer(p: ViewerProps) {
   const [err, setErr] = useState<string | null>(null);
   const [size, setSize] = useState<[number, number]>([800, 600]);
   const [pan, setPan] = useState<[number, number]>([0.5, 0.5]);
+  // touch: two-finger pinch zoom and double-tap to zoom
+  const touches = useRef(new Map<number, [number, number]>());
+  const pinch = useRef<{ d0: number; z0: number; uv: [number, number] } | null>(null);
+  const lastTap = useRef<{ t: number; x: number; y: number }>({ t: 0, x: 0, y: 0 });
   const [split, setSplit] = useState(0.5);
   const [holdBefore, setHoldBefore] = useState(false);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
@@ -193,7 +197,7 @@ export default function Viewer(p: ViewerProps) {
   const dragPan = (e: React.PointerEvent) => {
     const L = layout(); if (!L) return;
     const sx = e.clientX, sy = e.clientY, p0 = pan;
-    const mv = (ev: PointerEvent) => setPan([p0[0] - ((ev.clientX - sx) * L.D) / L.Dw, p0[1] - ((ev.clientY - sy) * L.D) / L.Dh]);
+    const mv = (ev: PointerEvent) => !pinch.current && setPan([p0[0] - ((ev.clientX - sx) * L.D) / L.Dw, p0[1] - ((ev.clientY - sy) * L.D) / L.Dh]);
     const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
   };
@@ -212,6 +216,18 @@ export default function Viewer(p: ViewerProps) {
     const [u, v] = toUV(e);
     const spaceHeld = (window as any).__spaceHeld;
     if (spaceHeld || (p.tool === 'none' && p.zoom !== 'fit')) { dragPan(e); return; }
+    if (p.tool === 'none' && e.pointerType === 'touch') {
+      // touch: double-tap toggles fit and 100%; one finger pans when zoomed in
+      const now = performance.now(), lt = lastTap.current;
+      const dbl = now - lt.t < 320 && Math.hypot(e.clientX - lt.x, e.clientY - lt.y) < 30;
+      lastTap.current = { t: dbl ? 0 : now, x: e.clientX, y: e.clientY };
+      if (dbl) {
+        if (p.zoom === 'fit') { setPan([Math.min(1, Math.max(0, u)), Math.min(1, Math.max(0, v))]); p.setZoom(1); } else p.setZoom('fit');
+        return;
+      }
+      if (p.zoom !== 'fit') dragPan(e);
+      return;
+    }
     if (p.tool === 'none' && p.zoom === 'fit') {
       // click to zoom to 100% at that point
       setPan([Math.min(1, Math.max(0, u)), Math.min(1, Math.max(0, v))]);
@@ -503,7 +519,29 @@ export default function Viewer(p: ViewerProps) {
 
   return (
     <div className="viewer" ref={wrap} onPointerDown={onDown} onWheel={wheel} style={{ cursor: cursorStyle }}
-      onPointerMove={(e) => { const b = wrap.current!.getBoundingClientRect(); setCursor([e.clientX - b.left, e.clientY - b.top]); }}
+      onPointerDownCapture={(e) => {
+        if (e.pointerType !== 'touch') return;
+        touches.current.set(e.pointerId, [e.clientX, e.clientY]);
+        if (touches.current.size === 2) {
+          e.stopPropagation();
+          const L = layout(); if (!L) return;
+          const [a, b] = [...touches.current.values()];
+          pinch.current = { d0: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z0: p.zoom === 'fit' ? L.fitZ / L.D : p.zoom, uv: toUV({ clientX: (a[0] + b[0]) / 2, clientY: (a[1] + b[1]) / 2 }) };
+        }
+      }}
+      onPointerUp={(e) => { touches.current.delete(e.pointerId); if (touches.current.size < 2) pinch.current = null; }}
+      onPointerCancel={(e) => { touches.current.delete(e.pointerId); if (touches.current.size < 2) pinch.current = null; }}
+      onPointerMove={(e) => {
+        const b = wrap.current!.getBoundingClientRect(); setCursor([e.clientX - b.left, e.clientY - b.top]);
+        if (!touches.current.has(e.pointerId)) return;
+        touches.current.set(e.pointerId, [e.clientX, e.clientY]);
+        const pc = pinch.current, L = layout();
+        if (!pc || !L || touches.current.size < 2) return;
+        const [q1, q2] = [...touches.current.values()];
+        const nz = Math.min(8, Math.max(L.fitZ / L.D, pc.z0 * Math.hypot(q1[0] - q2[0], q1[1] - q2[1]) / pc.d0));
+        setPan([Math.min(1, Math.max(0, pc.uv[0])), Math.min(1, Math.max(0, pc.uv[1]))]);
+        if (nz <= L.fitZ / L.D * 1.02) p.setZoom('fit'); else p.setZoom(nz);
+      }}
       onPointerLeave={() => setCursor(null)} onContextMenu={(e) => e.preventDefault()}>
       <canvas ref={canvas} className="gl" />
       <canvas ref={beforeCv} className="before" style={{ display: (p.before === 'split' || p.before === 'side') && !cropMode && ready ? 'block' : 'none' }} />
